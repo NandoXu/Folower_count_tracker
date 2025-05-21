@@ -1,6 +1,6 @@
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from database import init_db, upsert_account, delete_account, fetch_all_accounts, export_csv, import_csv  # Make sure import_csv exists in database.py
+from database import init_db, upsert_account, delete_account, fetch_all_accounts, export_csv # Make sure import_csv exists in database.py
 from scheduler import ScrapeScheduler
 from scraper.instagram import InstagramScraper
 from scraper.tiktok import TikTokScraper
@@ -54,30 +54,56 @@ class Controller:
         self.ui.refresh()
 
     def import_csv(self, path):
-        """Imports accounts from a CSV file and scrapes follower counts."""
+        """
+        Imports accounts from a CSV file and scrapes follower counts.
+        This version attempts to infer the platform if it's not explicitly provided
+        in the CSV row.
+        """
         try:
             with open(path, 'r', encoding='utf-8') as file:
                 reader = csv.reader(file)
-                next(reader)  # Skip the header row
-                for row in reader:
+                next(reader)  # Skip the header row (assuming your CSV has one)
+                for i, row in enumerate(reader): # Added index 'i' for better error reporting
+                    # We now expect at least 2 columns (Name, Link)
+                    if len(row) < 2:
+                        print(f"Skipping row {i+1}: Not enough columns: {row}")
+                        continue
+
+                    name = row[0].strip()
+                    link = row[1].strip()
+
+                    platform = "unknown" # Default platform
+                    # If the CSV row has a third column, use it as the platform
                     if len(row) >= 3:
-                        name, link, platform = row[0], row[1], row[2]
-                        # Check if the platform is valid.
-                        if platform.lower() not in self.scrapers:
-                            print(f"Skipping row: Invalid platform '{platform}'")
-                            continue
-                        try:
-                            # Scrape the follower count.
-                            cnt = self.scrapers[platform.lower()].scrape(link)
-                            category = "macro" if cnt >= 100000 else "micro"
-                            upsert_account(name, link, platform, cnt, category)
-                        except Exception as e:
-                            print(f"Failed to import/scrape: {name}, {link}, {platform} - Error: {e}")
-                            upsert_account(name, link, platform, 0, "failed")
+                        platform = row[2].strip().lower()
                     else:
-                        print(f"Skipping row: Not enough columns: {row}")
+                        # Attempt to infer platform from the link if not provided
+                        if "instagram.com" in link:
+                            platform = "instagram"
+                        elif "tiktok.com" in link:
+                            platform = "tiktok"
+                        elif "x.com" in link or "twitter.com" in link: # Covers both x.com and twitter.com
+                            platform = "twitter"
+                        else:
+                            print(f"Skipping row {i+1}: Could not determine platform for link '{link}'")
+                            continue # Skip if platform cannot be determined
+
+                    # Check if the determined platform is valid (i.e., we have a scraper for it).
+                    if platform not in self.scrapers:
+                        print(f"Skipping row {i+1}: Invalid or unsupported platform '{platform}' for link '{link}'")
+                        continue
+
+                    try:
+                        # Scrape the follower count using the corresponding scraper.
+                        cnt = self.scrapers[platform].scrape(link)
+                        category = "macro" if cnt >= 100000 else "micro"
+                        upsert_account(name, link, platform, cnt, category)
+                    except Exception as e:
+                        print(f"Failed to import/scrape: {name}, {link}, {platform} - Error: {e}")
+                        upsert_account(name, link, platform, 0, "failed")
             self.ui.refresh()  # Refresh the UI after importing
         except Exception as e:
+            # Re-raise the exception with a more informative message for the UI
             raise Exception(f"Error importing CSV file: {e}")
 
     def export_csv(self):
