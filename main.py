@@ -1,0 +1,104 @@
+import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from database import init_db, upsert_account, delete_account, fetch_all_accounts, export_csv, import_csv  # Make sure import_csv exists in database.py
+from scheduler import ScrapeScheduler
+from scraper.instagram import InstagramScraper
+from scraper.tiktok import TikTokScraper
+from scraper.x_twitter import XTwitterScraper
+from ui import AppUI
+import csv
+
+class Controller:
+    def __init__(self, root):
+        # Initialize the database.
+        init_db()
+        # Set up scrapers for each platform.
+        self.scrapers = {
+            "instagram": InstagramScraper(),
+            "tiktok":    TikTokScraper(),
+            "twitter":   XTwitterScraper()
+        }
+        # Create the UI
+        self.ui = AppUI(root, self)
+        # Start a scheduler that periodically updates all accounts (every 60 minutes, for example)
+        self.scheduler = ScrapeScheduler(self.update_all, interval_minutes=60)
+        self.scheduler.start()
+
+    def add_account(self, name, link, platform):
+        # Scrape the follower count using the corresponding scraper.
+        cnt = self.scrapers[platform].scrape(link)
+        category = "macro" if cnt >= 100000 else "micro"
+        upsert_account(name, link, platform, cnt, category)
+        self.ui.refresh()
+
+    def delete_account(self, link):
+        delete_account(link)
+        self.ui.refresh()
+
+    def update_all(self):
+        accounts = fetch_all_accounts()
+
+        def update_acc(acc):
+            name, link, platform, _, _ = acc
+            cnt = self.scrapers[platform].scrape(link)
+            category = "macro" if cnt >= 100000 else "micro"
+            upsert_account(name, link, platform, cnt, category)
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(update_acc, acc) for acc in accounts]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    print("Error updating account:", e)
+        self.ui.refresh()
+
+    def import_csv(self, path):
+        """Imports accounts from a CSV file and scrapes follower counts."""
+        try:
+            with open(path, 'r', encoding='utf-8') as file:
+                reader = csv.reader(file)
+                next(reader)  # Skip the header row
+                for row in reader:
+                    if len(row) >= 3:
+                        name, link, platform = row[0], row[1], row[2]
+                        # Check if the platform is valid.
+                        if platform.lower() not in self.scrapers:
+                            print(f"Skipping row: Invalid platform '{platform}'")
+                            continue
+                        try:
+                            # Scrape the follower count.
+                            cnt = self.scrapers[platform.lower()].scrape(link)
+                            category = "macro" if cnt >= 100000 else "micro"
+                            upsert_account(name, link, platform, cnt, category)
+                        except Exception as e:
+                            print(f"Failed to import/scrape: {name}, {link}, {platform} - Error: {e}")
+                            upsert_account(name, link, platform, 0, "failed")
+                    else:
+                        print(f"Skipping row: Not enough columns: {row}")
+            self.ui.refresh()  # Refresh the UI after importing
+        except Exception as e:
+            raise Exception(f"Error importing CSV file: {e}")
+
+    def export_csv(self):
+        export_csv()
+
+    def fetch_all(self):
+        return fetch_all_accounts()
+
+    def sort_by(self, tree, col):
+        data = [(tree.set(k, col), k) for k in tree.get_children("")]
+        try:
+            data.sort(key=lambda t: int(t[0]))
+        except ValueError:
+            data.sort(key=lambda t: t[0].lower())
+        for index, (_, k) in enumerate(data):
+            tree.move(k, "", index)
+
+def main():
+    root = tk.Tk()
+    Controller(root)
+    root.mainloop()
+
+if __name__ == '__main__':
+    main()
