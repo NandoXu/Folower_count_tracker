@@ -12,6 +12,7 @@ import random
 import time
 import sys # Import sys for better error handling/feedback
 from tkinter import filedialog # Import filedialog for file dialog operations
+import threading # Import threading for _scrape_and_update_single_account
 
 class Controller:
     def __init__(self, root):
@@ -72,7 +73,7 @@ class Controller:
         # If no detected platform, but selected platform is valid, proceed.
         # This handles cases where auto_detect_platform might not catch it, but the user explicitly chose correctly.
         if not detected_platform and platform.lower() not in self.scrapers:
-            tk.messagebox.showerror("Platform Error", f"Could not determine platform from link '{link}'. Please ensure the link is valid for '{platform}'.")
+            # tk.messagebox.showerror("Platform Error", f"Could not determine platform from link '{link}'. Please ensure the link is valid for '{platform}'.") # Commented out this line
             print(f"Controller: Add failed - Could not determine platform from link {link} for selected {platform}", file=sys.stderr)
             return
 
@@ -213,9 +214,9 @@ class Controller:
 
                 # Validate platform consistency for update
                 if detected_platform and detected_platform.lower() != current_platform.lower():
-                    tk.messagebox.showwarning("Platform Mismatch", 
-                                             f"Skipping update for '{name}' (Link: {current_link}). "
-                                             f"Detected platform '{detected_platform}' does not match stored platform '{current_platform}'.")
+                    # tk.messagebox.showwarning("Platform Mismatch", # Commented out this line
+                    #                          f"Skipping update for '{name}' (Link: {current_link}). "
+                    #                          f"Detected platform '{detected_platform}' does not match stored platform '{current_platform}'.")
                     print(f"Controller: Skipping update for {name} due to platform mismatch: Link detected as '{detected_platform}', stored as '{current_platform}'", file=sys.stderr)
                     # Mark as failed_platform in DB if it was previously valid, or just skip
                     upsert_account(name, current_link, current_platform, 0, "failed_platform")
@@ -223,9 +224,9 @@ class Controller:
                 
                 # If the stored platform is not in supported scrapers, mark as failed_platform
                 if current_platform.lower() not in self.scrapers:
-                    tk.messagebox.showwarning("Unsupported Platform", 
-                                             f"Skipping update for '{name}' (Link: {current_link}). "
-                                             f"Stored platform '{current_platform}' is not supported for scraping.")
+                    # tk.messagebox.showwarning("Unsupported Platform", # Commented out this line
+                    #                          f"Skipping update for '{name}' (Link: {current_link}). "
+                    #                          f"Stored platform '{current_platform}' is not supported for scraping.")
                     print(f"Controller: Skipping update for {name} due to unsupported stored platform: {current_platform}", file=sys.stderr)
                     upsert_account(name, current_link, current_platform, 0, "failed_platform")
                     continue # Skip this account for scraping
